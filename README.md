@@ -1,5 +1,6 @@
 <p align="center">
-  <img src="Abcons.jpg" alt="ABCONS Logo" width="250"/>
+  ![Abcons logo](https://github.com/abconsinfrallp-arch/Simhasth-Hackathon-ABCONS/raw/main/Abcons.jpg)
+  <img src="Abcons.jpg" alt="ABCONS" width="250"/>
 </p>
 
 # 🌊 ABCONS Technology – Smart River & Nala Management  
