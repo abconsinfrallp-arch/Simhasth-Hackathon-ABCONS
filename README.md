@@ -1,5 +1,5 @@
 <p align="center">
-   <img src="Abcons.jpg" alt="ABCONS" width="250"/>
+   <img src="Abcons.jpg"  width="250"/>
 </p>
 
 # 🌊 ABCONS Technology – Smart River & Nala Management  
