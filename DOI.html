@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ABCONS Integrated Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+body {font-family: Arial,sans-serif; margin:0; padding:0; background:#0f0f1e; color:#fff;}
+header {display:flex; align-items:center; padding:15px 30px; background:linear-gradient(90deg,#2c3e50,#8e44ad); box-shadow:0 4px 8px rgba(0,0,0,0.5);}
+header img {height:60px; margin-right:20px;}
+header h1 {font-size:26px; margin:0; flex-grow:1;}
+.controls {text-align:center;padding:10px;background:#1a1a2e;}
+.controls input, .controls button {padding:5px 10px; margin:0 5px; border:none; border-radius:5px;}
+.controls button {cursor:pointer;}
+.dashboard {display:flex; flex-wrap:wrap; gap:20px; padding:20px; justify-content:center; position:relative;}
+.card {background: rgba(40,40,70,0.95); border-radius:15px; padding:20px; width:420px; box-shadow:0 0 20px rgba(0,255,255,0.4); transition: transform 0.2s;}
+.card:hover {transform:scale(1.03); box-shadow:0 0 30px rgba(0,255,255,0.6);}
+.card h2 {margin:0 0 10px 0; text-align:center; color:#00f0ff;}
+.indicator {font-size:18px; margin-bottom:10px; text-align:center;}
+.bar-container {width:100%; height:25px; background:#333; border-radius:10px; overflow:hidden; margin-bottom:10px;}
+.bar {height:100%; width:0%; background:#27ae60; transition: width 0.5s, background-color 0.5s;}
+canvas {background: rgba(15,15,30,0.5); border-radius:10px; margin-top:10px;}
+.alarm {text-align:center;font-weight:bold;font-size:16px; margin-top:5px;}
+#siteMapContainer{position:absolute; top:20px; right:20px; width:300px; height:250px; border:2px solid #00f0ff; border-radius:10px; overflow:hidden; z-index:10;}
+#siteMapContainer img{width:100%; height:100%; object-fit:cover;}
+#overlayCanvas{position:absolute; top:0; left:0;}
+#microAlgaeStatus{position:absolute; bottom:5px; left:5px; background:rgba(0,0,0,0.5); color:#fff; padding:2px 5px; border-radius:5px;}
+footer {text-align:center;padding:10px;background:#2c3e50;color:#fff;font-size:14px;}
+</style>
+</head>
+<body>
+
+<header>
+<img src="logo.png" alt="ABCONS Logo">
+<h1>ABCONS Integrated Dashboard</h1>
+</header>
+
+<div class="controls">
+<label>Start:</label><input type="date" id="startDate">
+<label>End:</label><input type="date" id="endDate">
+<button id="fetchReport">Fetch Report</button>
+<button id="downloadCSV">Download CSV</button>
+<button id="downloadPDF">Download PDF</button>
+</div>
+
+<div class="dashboard" id="dashboard"></div>
+
+<div id="siteMapContainer">
+<img id="siteMap" src="https://maps.googleapis.com/maps/api/staticmap?center=LAT,LON&zoom=18&size=300x250&maptype=satellite&key=YOUR_API_KEY" alt="Site Map">
+<canvas id="overlayCanvas" width="300" height="250"></canvas>
+<div id="microAlgaeStatus">Algae: Healthy</div>
+</div>
+
+<footer>
+Last Updated: <span id="timestamp"></span> | Source: ABCONS Technology
+</footer>
+
+<script>
+const parameters=[
+{name:'Flow',unit:'MLD',min:0,max:12,warning:8,critical:10},
+{name:'pH',unit:'',min:6.5,max:8.5,warning:6.8,critical:6.5},
+{name:'TSS',unit:'mg/L',min:0,max:100,warning:80,critical:100},
+{name:'BOD',unit:'mg/L',min:0,max:30,warning:25,critical:30},
+{name:'COD',unit:'mg/L',min:0,max:250,warning:200,critical:250},
+{name:'DO',unit:'mg/L',min:4,max:10,warning:5,critical:4},
+{name:'Temperature',unit:'°C',min:20,max:35,warning:32,critical:35},
+{name:'Turbidity',unit:'NTU',min:0,max:5,warning:4,critical:5}];
+
+const dashboard=document.getElementById('dashboard');
+const charts={}, chartLength=20, targetDO=5.5, maxDose=12;
+const overlayCanvas=document.getElementById('overlayCanvas');
+const ctx=overlayCanvas.getContext('2d');
+
+function generateRandom(min,max){return (Math.random()*(max-min)+min).toFixed(2);}
+
+function createWidgets(){
+parameters.forEach(param=>{
+const card=document.createElement('div'); card.className='card';
+card.innerHTML=`
+<h2>${param.name}</h2>
+<div class="indicator">Inlet: <span id="${param.name}-inlet">0</span> ${param.unit} | Outlet: <span id="${param.name}-outlet">0</span> ${param.unit}</div>
+<canvas id="${param.name}-inlet-chart" width="350" height="150"></canvas>
+<canvas id="${param.name}-outlet-chart" width="350" height="150"></canvas>
+<div class="alarm" id="${param.name}-alarm">STATUS</div>`;
+dashboard.appendChild(card);
+
+const inletCtx=document.getElementById(`${param.name}-inlet-chart`).getContext('2d');
+charts[`${param.name}-inlet`]=new Chart(inletCtx,{type:'line',data:{labels:Array(chartLength).fill(''),datasets:[{label:'Inlet',data:Array(chartLength).fill(generateRandom(param.min,param.max)),borderColor:'rgba(52,152,219,1)',backgroundColor:'rgba(52,152,219,0.2)',tension:0.3}]},options:{responsive:true,animation:false,scales:{y:{min:param.min,max:param.max}}}});
+const outletCtx=document.getElementById(`${param.name}-outlet-chart`).getContext('2d');
+charts[`${param.name}-outlet`]=new Chart(outletCtx,{type:'line',data:{labels:Array(chartLength).fill(''),datasets:[{label:'Outlet',data:Array(chartLength).fill(generateRandom(param.min,param.max)),borderColor:'rgba(231,76,60,1)',backgroundColor:'rgba(231,76,60,0.2)',tension:0.3}]},options:{responsive:true,animation:false,scales:{y:{min:param.min,max:param.max}}}});
+});
+
+// Dosing Card
+const dosingCard=document.createElement('div'); dosingCard.className='card';
+dosingCard.innerHTML=`
+<h2>ABCONS Aqua Clean Dosing</h2>
+<div class="indicator">Dosing Rate: <span id="doseRate">0</span> L/h</div>
+<div class="bar-container"><div id="doseBar" class="bar"></div></div>
+<canvas id="doseChart" width="350" height="150"></canvas>`;
+dashboard.appendChild(dosingCard);
+const doseCtx=document.getElementById('doseChart').getContext('2d');
+charts['dosing']=new Chart(doseCtx,{type:'line',data:{labels:Array(chartLength).fill(''),datasets:[{label:'Dosing (L/h)',data:Array(chartLength).fill(0),borderColor:'#27ae60',backgroundColor:'rgba(39,174,96,0.2)',tension:0.3}]},options:{responsive:true,animation:false,scales:{y:{min:0,max:maxDose}}}});
+
+// Microalgae Card
+const algaeCard=document.createElement('div'); algaeCard.className='card';
+algaeCard.innerHTML=`
+<h2>Microalgae Cultivation</h2>
+<div class="indicator">Algae Concentration: <span id="algaeLevel">0</span>%</div>
+<canvas id="algaeChart" width="350" height="150"></canvas>`;
+dashboard.appendChild(algaeCard);
+const algaeCtx=document.getElementById('algaeChart').getContext('2d');
+charts['algae']=new Chart(algaeCtx,{type:'line',data:{labels:Array(chartLength).fill(''),datasets:[{label:'Algae (%)',data:Array(chartLength).fill(0),borderColor:'#f1c40f',backgroundColor:'rgba(241,196,15,0.2)',tension:0.3}]},options:{responsive:true,animation:false,scales:{y:{min:0,max:100}}}});
+}
+
+createWidgets();
+
+function calculateDose(DO, flow){
+let dose=(targetDO-DO)*flow*1.2;
+if(dose<0)dose=0;if(dose>maxDose)dose=maxDose;
+return parseFloat(dose.toFixed(2));
+}
+
+function drawOverlay(algaeLevel){
+ctx.clearRect(0,0,overlayCanvas.width,overlayCanvas.height);
+ctx.globalAlpha=0.4;
+if(algaeLevel>70){ctx.fillStyle='red';}
+else if(algaeLevel>40){ctx.fillStyle='yellow';}
+else{ctx.fillStyle='green';}
+ctx.fillRect(0,0,overlayCanvas.width,overlayCanvas.height);
+}
+
+function updateAll(){
+let currentDO=5,currentFlow=5;
+parameters.forEach(param=>{
+const inlet=parseFloat(generateRandom(param.min,param.max));
+const outlet=parseFloat(generateRandom(param.min,param.max));
+document.getElementById(`${param.name}-inlet`).innerText=inlet;
+document.getElementById(`${param.name}-outlet`).innerText=outlet;
+charts[`${param.name}-inlet`].data.datasets[0].data.shift();
+charts[`${param.name}-inlet`].data.datasets[0].data.push(inlet);
+charts[`${param.name}-inlet`].update();
+charts[`${param.name}-outlet`].data.datasets[0].data.shift();
+charts[`${param.name}-outlet`].data.datasets[0].data.push(outlet);
+charts[`${param.name}-outlet`].update();
+const alarm=document.getElementById(`${param.name}-alarm`);
+if(outlet<param.critical){alarm.innerText='CRITICAL';alarm.style.color='#ff0000';}
+else if(outlet<param.warning){alarm.innerText='WARNING';alarm.style.color='#ffff00';alarm.style.color='#000';}
+else{alarm.innerText='NORMAL';alarm.style.color='#27ae60';}
+if(param.name==='DO'){currentDO=outlet;}
+if(param.name==='Flow'){currentFlow=outlet;}
+});
+
+// Dosing update
+const dose=calculateDose(currentDO,currentFlow);
+document.getElementById('doseRate').innerText=dose;
+const bar=document.getElementById('doseBar');
+bar.style.width=(dose/maxDose*100)+'%';
+bar.style.backgroundColor=(currentDO<4?'#ff0000':currentDO<5?'#ffff00':'#27ae60');
+charts['dosing'].data.datasets[0].data.shift(); charts['dosing'].data.datasets[0].data.push(dose); charts['dosing'].update();
+
+// Microalgae update
+const algaeLevel=parseFloat(generateRandom(0,100));
+document.getElementById('algaeLevel').innerText=algaeLevel;
+charts['algae'].data.datasets[0].data.shift(); charts['algae'].data.datasets[0].data.push(algaeLevel); charts['algae'].update();
+const algaeStatus=document.getElementById('microAlgaeStatus');
+if(algaeLevel>70){algaeStatus.innerText='Algae: Critical'; algaeStatus.style.background='#ff0000'; algaeStatus.style.color='#fff';}
+else if(algaeLevel>40){algaeStatus.innerText='Algae: Warning'; algaeStatus.style.background='#ffff00'; algaeStatus.style.color='#000';}
+else{algaeStatus.innerText='Algae: Healthy'; algaeStatus.style.background='#27ae60'; algaeStatus.style.color='#fff';}
+
+// Chemical / algae overlay
+drawOverlay(algaeLevel);
+
+document.getElementById('timestamp').innerText=new Date().toLocaleTimeString();
+}
+
+setInterval(updateAll,2000);
+</script>
+</body>
+</html>
